@@ -1,0 +1,1697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PawsTrack Pro - Dog Walking Business Management</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#fffbe1',
+                            100: '#fef3c7',
+                            500: '#f59e0b',
+                            600: '#d97706',
+                            700: '#b45309',
+                            800: '#92400e',
+                        },
+                        pet: {
+                            teal: '#0d9488',
+                            slate: '#1e293b',
+                            warm: '#fafaf9'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Leaflet CSS & JS for Live Route Mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <!-- Custom Styles -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        #walkMap {
+            height: 320px;
+            width: 100%;
+            border-radius: 1rem;
+            z-index: 10;
+        }
+        .pulse-ring {
+            animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(217, 119, 6, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(217, 119, 6, 0); }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        .paw-marker {
+            font-size: 20px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <div id="app" class="flex-1 flex flex-col min-h-screen">
+        
+        <!-- TOP NAVIGATION HEADER -->
+        <header class="bg-slate-900 text-white sticky top-0 z-50 shadow-md">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center justify-between h-16">
+                    
+                    <!-- Brand Logo -->
+                    <div class="flex items-center space-x-3 cursor-pointer" @click="activeTab = 'dashboard'">
+                        <div class="bg-amber-500 text-slate-900 p-2.5 rounded-xl font-bold flex items-center justify-center shadow-lg shadow-amber-500/20">
+                            <i class="fa-solid fa-paw text-xl"></i>
+                        </div>
+                        <div>
+                            <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">PawsTrack Pro</span>
+                            <span class="hidden sm:inline-block text-xs bg-slate-800 text-amber-400 px-2 py-0.5 rounded-full ml-2 border border-slate-700">Pet Business Manager</span>
+                        </div>
+                    </div>
+
+                    <!-- Desktop Nav Tabs -->
+                    <nav class="hidden md:flex space-x-1 lg:space-x-2">
+                        <button v-for="tab in tabs" :key="tab.id"
+                                @click="setActiveTab(tab.id)"
+                                :class="[
+                                    activeTab === tab.id 
+                                        ? 'bg-amber-500 text-slate-900 font-semibold shadow-sm' 
+                                        : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+                                    'px-3.5 py-2 rounded-xl text-sm transition-all duration-150 flex items-center space-x-2'
+                                ]">
+                            <i :class="tab.icon"></i>
+                            <span>{{ tab.name }}</span>
+                            <!-- Active Walk Live Indicator Badge -->
+                            <span v-if="tab.id === 'walk' && activeWalk.isRunning" 
+                                  class="flex h-2 w-2 relative">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                            </span>
+                        </button>
+                    </nav>
+
+                    <!-- Header Quick Actions / Status -->
+                    <div class="flex items-center space-x-3">
+                        <div v-if="activeWalk.isRunning" 
+                             @click="setActiveTab('walk')" 
+                             class="cursor-pointer bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-full flex items-center space-x-2 text-xs text-amber-400 hover:bg-amber-500/20 transition-all">
+                            <span class="w-2 h-2 rounded-full bg-amber-500 pulse-ring"></span>
+                            <span class="font-mono font-medium">{{ formatTime(activeWalk.elapsedSeconds) }}</span>
+                            <span class="hidden lg:inline text-slate-400">| {{ activeWalk.dogName }}</span>
+                        </div>
+
+                        <!-- Reset Data Button -->
+                        <button @click="confirmResetData" 
+                                title="Reset Sample Data"
+                                class="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg text-sm transition-colors">
+                            <i class="fa-solid fa-rotate-left"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mobile Sub Nav Bar -->
+            <div class="md:hidden flex overflow-x-auto border-t border-slate-800 px-2 py-2 space-x-1 custom-scrollbar">
+                <button v-for="tab in tabs" :key="tab.id"
+                        @click="setActiveTab(tab.id)"
+                        :class="[
+                            activeTab === tab.id 
+                                ? 'bg-amber-500 text-slate-900 font-semibold' 
+                                : 'text-slate-300 hover:bg-slate-800',
+                            'px-3 py-1.5 rounded-lg text-xs whitespace-nowrap flex items-center space-x-1.5'
+                        ]">
+                    <i :class="tab.icon"></i>
+                    <span>{{ tab.name }}</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- TOAST / NOTIFICATION BENCH -->
+        <div v-if="toast.show" 
+             class="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-3 transition-all duration-300 transform translate-y-0">
+            <div class="p-1.5 rounded-lg bg-amber-500 text-slate-900 text-xs font-bold">
+                <i :class="toast.icon || 'fa-solid fa-circle-info'"></i>
+            </div>
+            <p class="text-sm font-medium">{{ toast.message }}</p>
+            <button @click="toast.show = false" class="text-slate-400 hover:text-white ml-2 text-xs">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            
+            <!-- 1. DASHBOARD TAB -->
+            <div v-if="activeTab === 'dashboard'" class="space-y-6">
+                
+                <!-- Welcome Banner -->
+                <div class="bg-gradient-to-r from-slate-900 via-slate-800 to-amber-950 text-white rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                    <div class="absolute right-0 top-0 bottom-0 opacity-10 flex items-center pr-8 pointer-events-none">
+                        <i class="fa-solid fa-dog text-9xl"></i>
+                    </div>
+                    <div class="relative z-10 max-w-xl">
+                        <span class="text-xs uppercase tracking-wider font-semibold text-amber-400">Daily Operations Overview</span>
+                        <h1 class="text-2xl sm:text-3xl font-bold mt-1">Ready for today's pack walks? 🐾</h1>
+                        <p class="text-slate-300 text-sm mt-2">You have <span class="text-amber-400 font-bold">{{ todayScheduledCount }} walks</span> scheduled for today. Track walks, log pet behavior, and send quick SMS report cards!</p>
+                        
+                        <div class="mt-4 flex flex-wrap gap-3">
+                            <button @click="setActiveTab('walk')" 
+                                    class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2 rounded-xl font-semibold text-sm transition-all shadow-md flex items-center space-x-2">
+                                <i class="fa-solid fa-stopwatch"></i>
+                                <span>Start Live Walk Tracker</span>
+                            </button>
+                            <button @click="openQuickWalkModal" 
+                                    class="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 px-4 py-2 rounded-xl font-medium text-sm transition-all flex items-center space-x-2">
+                                <i class="fa-solid fa-bolt"></i>
+                                <span>Log Past Walk</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- KEY METRICS CARDS -->
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <!-- Scheduled Today -->
+                    <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between text-slate-500">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Scheduled Today</span>
+                            <div class="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                                <i class="fa-solid fa-calendar-day"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <div class="text-2xl sm:text-3xl font-bold text-slate-900">{{ todayScheduledCount }}</div>
+                            <span class="text-xs text-slate-500 mt-1 block">{{ todayCompletedCount }} completed today</span>
+                        </div>
+                    </div>
+
+                    <!-- Completed Walks -->
+                    <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between text-slate-500">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Completed (Week)</span>
+                            <div class="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                                <i class="fa-solid fa-circle-check"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <div class="text-2xl sm:text-3xl font-bold text-slate-900">{{ completedThisWeekCount }}</div>
+                            <span class="text-xs text-emerald-600 mt-1 font-medium flex items-center">
+                                <i class="fa-solid fa-arrow-trend-up mr-1"></i> Excellent pace
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Weekly Revenue -->
+                    <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between text-slate-500">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Weekly Revenue</span>
+                            <div class="p-2 bg-amber-50 text-amber-600 rounded-xl">
+                                <i class="fa-solid fa-sack-dollar"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <div class="text-2xl sm:text-3xl font-bold text-slate-900">${{ weeklyRevenue.toFixed(2) }}</div>
+                            <span class="text-xs text-slate-500 mt-1 block">From completed walks</span>
+                        </div>
+                    </div>
+
+                    <!-- Pending Payments -->
+                    <div class="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+                        <div class="flex items-center justify-between text-slate-500">
+                            <span class="text-xs font-semibold uppercase tracking-wider">Pending Payments</span>
+                            <div class="p-2 bg-rose-50 text-rose-600 rounded-xl">
+                                <i class="fa-solid fa-clock-rotate-left"></i>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <div class="text-2xl sm:text-3xl font-bold text-slate-900">${{ pendingRevenue.toFixed(2) }}</div>
+                            <span class="text-xs text-rose-500 mt-1 font-medium block cursor-pointer hover:underline" @click="activeTab = 'billing'">
+                                {{ pendingCount }} unpaid walk(s)
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TODAY'S SCHEDULE TIMELINE -->
+                <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5 sm:p-6">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                        <div>
+                            <h2 class="text-lg font-bold text-slate-900">Today's Schedule & Timeline</h2>
+                            <p class="text-xs text-slate-500">{{ formattedTodayDate }}</p>
+                        </div>
+                        
+                        <!-- Timeline Filter Pills -->
+                        <div class="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-xl text-xs font-medium self-start">
+                            <button v-for="status in ['All', 'Scheduled', 'In Progress', 'Completed']" :key="status"
+                                    @click="timelineFilter = status"
+                                    :class="[
+                                        timelineFilter === status ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900',
+                                        'px-3 py-1.5 rounded-lg transition-all'
+                                    ]">
+                                {{ status }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Timeline List -->
+                    <div class="space-y-3">
+                        <div v-for="walk in filteredTodayWalks" :key="walk.id"
+                             class="p-4 rounded-xl border border-slate-100 hover:border-slate-300 transition-all bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            
+                            <!-- Left: Time & Dog Details -->
+                            <div class="flex items-start space-x-4">
+                                <div class="bg-amber-100 text-amber-800 px-3 py-2 rounded-xl text-center min-w-[75px]">
+                                    <span class="text-xs font-bold block uppercase">{{ walk.time }}</span>
+                                    <span class="text-[10px] text-amber-700 block font-medium">{{ walk.duration }} min</span>
+                                </div>
+                                <div>
+                                    <div class="flex items-center space-x-2">
+                                        <h3 class="font-bold text-slate-900 text-base">{{ walk.dogName }}</h3>
+                                        <span class="text-xs text-slate-500">({{ getClientByDog(walk.dogName)?.ownerName || 'Client' }})</span>
+                                        <span :class="getStatusBadgeClass(walk.status)">
+                                            {{ walk.status }}
+                                        </span>
+                                    </div>
+                                    <p class="text-xs text-slate-600 mt-1 flex items-center gap-2">
+                                        <span><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>{{ walk.address || 'Client Address' }}</span>
+                                        <span class="text-slate-300">•</span>
+                                        <span class="text-slate-500 font-mono"><i class="fa-solid fa-key text-slate-400 mr-1"></i>Code: {{ getClientByDog(walk.dogName)?.entryCode || 'N/A' }}</span>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- Right: Actions -->
+                            <div class="flex items-center space-x-2 self-end md:self-center">
+                                <template v-if="walk.status === 'Scheduled'">
+                                    <button @click="startWalkFromSchedule(walk)" 
+                                            class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold px-3.5 py-1.5 rounded-xl text-xs transition-colors shadow-sm flex items-center space-x-1.5">
+                                        <i class="fa-solid fa-play"></i>
+                                        <span>Start Walk</span>
+                                    </button>
+                                    <button @click="markWalkCompleted(walk.id)" 
+                                            class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-medium px-3 py-1.5 rounded-xl text-xs transition-colors border border-emerald-200">
+                                        Mark Done
+                                    </button>
+                                </template>
+
+                                <template v-if="walk.status === 'In Progress'">
+                                    <button @click="setActiveTab('walk')" 
+                                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-xl text-xs transition-colors shadow-sm flex items-center space-x-1.5 animate-pulse">
+                                        <i class="fa-solid fa-location-arrow"></i>
+                                        <span>Track Live</span>
+                                    </button>
+                                </template>
+
+                                <template v-if="walk.status === 'Completed'">
+                                    <button @click="viewReportCard(walk)" 
+                                            class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium px-3 py-1.5 rounded-xl text-xs transition-colors flex items-center space-x-1">
+                                        <i class="fa-solid fa-file-lines text-slate-600"></i>
+                                        <span>Report Card</span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- Empty State -->
+                        <div v-if="filteredTodayWalks.length === 0" class="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                            <i class="fa-solid fa-dog text-3xl text-slate-300 mb-2"></i>
+                            <p class="text-sm font-medium text-slate-600">No walks found matching filter</p>
+                            <p class="text-xs text-slate-400">Select another filter or schedule a walk from the calendar.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. ACTIVE WALK COMPANION TAB -->
+            <div v-if="activeTab === 'walk'" class="space-y-6">
+                
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- LEFT COLUMN: Live Controls & Stats (1 Col on LG) -->
+                    <div class="space-y-6">
+                        
+                        <!-- Walk Controller Box -->
+                        <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-4">
+                            <div class="flex items-center justify-between">
+                                <h2 class="font-bold text-slate-900 text-base flex items-center space-x-2">
+                                    <i class="fa-solid fa-stopwatch text-amber-500"></i>
+                                    <span>Active Walk Tracker</span>
+                                </h2>
+                                <span v-if="activeWalk.isRunning" class="text-xs bg-emerald-100 text-emerald-800 font-semibold px-2.5 py-0.5 rounded-full">
+                                    Live Recording
+                                </span>
+                            </div>
+
+                            <!-- Pet Selector (If no walk currently running) -->
+                            <div v-if="!activeWalk.isRunning && activeWalk.elapsedSeconds === 0">
+                                <label class="block text-xs font-semibold text-slate-600 uppercase mb-1">Select Dog for Walk</label>
+                                <select v-model="activeWalk.selectedDog" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none">
+                                    <option value="" disabled>-- Choose Client's Pet --</option>
+                                    <option v-for="client in clients" :key="client.id" :value="client.dogName">
+                                        {{ client.dogName }} ({{ client.ownerName }} - {{ client.neighborhood }})
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div v-else class="p-3 bg-slate-900 text-white rounded-xl flex items-center justify-between">
+                                <div>
+                                    <span class="text-xs text-amber-400 block font-medium">Walking Pet</span>
+                                    <span class="text-lg font-bold">{{ activeWalk.dogName }}</span>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-xs text-slate-400 block">Owner</span>
+                                    <span class="text-sm font-semibold">{{ getClientByDog(activeWalk.dogName)?.ownerName }}</span>
+                                </div>
+                            </div>
+
+                            <!-- Timer Display -->
+                            <div class="text-center py-4 bg-slate-50 rounded-xl border border-slate-200">
+                                <span class="text-4xl font-black font-mono tracking-tight text-slate-900 block">
+                                    {{ formatTime(activeWalk.elapsedSeconds) }}
+                                </span>
+                                <span class="text-xs text-slate-500 mt-1 block">Elapsed Time</span>
+                            </div>
+
+                            <!-- Controls -->
+                            <div class="grid grid-cols-2 gap-3">
+                                <button v-if="!activeWalk.isRunning" 
+                                        @click="startTimer" 
+                                        :disabled="!activeWalk.selectedDog && activeWalk.elapsedSeconds === 0"
+                                        class="col-span-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-bold py-3 rounded-xl shadow-md transition-all flex items-center justify-center space-x-2">
+                                    <i class="fa-solid fa-play"></i>
+                                    <span>{{ activeWalk.elapsedSeconds > 0 ? 'Resume Walk' : 'Start Live Walk' }}</span>
+                                </button>
+
+                                <template v-else>
+                                    <button @click="pauseTimer" 
+                                            class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-2.5 rounded-xl transition-all flex items-center justify-center space-x-2">
+                                        <i class="fa-solid fa-pause"></i>
+                                        <span>Pause</span>
+                                    </button>
+                                    <button @click="finishWalk" 
+                                            class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center space-x-2">
+                                        <i class="fa-solid fa-flag-checkered"></i>
+                                        <span>Finish Walk</span>
+                                    </button>
+                                </template>
+                            </div>
+                        </div>
+
+                        <!-- EVENT COUNTERS (Pee, Poop, Water, Treats) -->
+                        <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-3">
+                            <h3 class="font-bold text-slate-900 text-sm uppercase tracking-wider text-slate-500">Walk Activity Logging</h3>
+                            
+                            <div class="grid grid-cols-2 gap-3">
+                                <!-- Pee Counter -->
+                                <button @click="incrementEvent('pee')" 
+                                        class="p-3 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100/80 transition-all text-left flex items-center justify-between group">
+                                    <div>
+                                        <span class="text-xs text-blue-700 font-bold block">Pee 💦</span>
+                                        <span class="text-2xl font-black text-blue-900">{{ activeWalk.events.pee }}</span>
+                                    </div>
+                                    <div class="w-8 h-8 rounded-full bg-blue-200 text-blue-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                        <i class="fa-solid fa-plus text-xs"></i>
+                                    </div>
+                                </button>
+
+                                <!-- Poop Counter -->
+                                <button @click="incrementEvent('poop')" 
+                                        class="p-3 rounded-xl border border-amber-200 bg-amber-50/50 hover:bg-amber-100/80 transition-all text-left flex items-center justify-between group">
+                                    <div>
+                                        <span class="text-xs text-amber-800 font-bold block">Poop 💩</span>
+                                        <span class="text-2xl font-black text-amber-950">{{ activeWalk.events.poop }}</span>
+                                    </div>
+                                    <div class="w-8 h-8 rounded-full bg-amber-200 text-amber-900 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                        <i class="fa-solid fa-plus text-xs"></i>
+                                    </div>
+                                </button>
+
+                                <!-- Water Counter -->
+                                <button @click="incrementEvent('water')" 
+                                        class="p-3 rounded-xl border border-teal-200 bg-teal-50/50 hover:bg-teal-100/80 transition-all text-left flex items-center justify-between group">
+                                    <div>
+                                        <span class="text-xs text-teal-700 font-bold block">Water 🥣</span>
+                                        <span class="text-2xl font-black text-teal-900">{{ activeWalk.events.water }}</span>
+                                    </div>
+                                    <div class="w-8 h-8 rounded-full bg-teal-200 text-teal-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                        <i class="fa-solid fa-plus text-xs"></i>
+                                    </div>
+                                </button>
+
+                                <!-- Treats Counter -->
+                                <button @click="incrementEvent('treat')" 
+                                        class="p-3 rounded-xl border border-orange-200 bg-orange-50/50 hover:bg-orange-100/80 transition-all text-left flex items-center justify-between group">
+                                    <div>
+                                        <span class="text-xs text-orange-700 font-bold block">Treats 🦴</span>
+                                        <span class="text-2xl font-black text-orange-900">{{ activeWalk.events.treat }}</span>
+                                    </div>
+                                    <div class="w-8 h-8 rounded-full bg-orange-200 text-orange-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+                                        <i class="fa-solid fa-plus text-xs"></i>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Pet Notes Input -->
+                        <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
+                            <label class="block text-xs font-semibold text-slate-600 uppercase mb-2">Walk Behavior Notes</label>
+                            <textarea v-model="activeWalk.notes" 
+                                      rows="3" 
+                                      placeholder="e.g. Milo was energetic, stayed off the road, made friends with a golden doodle..." 
+                                      class="w-full border border-slate-200 rounded-xl p-3 text-xs focus:ring-2 focus:ring-amber-500 outline-none resize-none"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: Interactive Leaflet Map & GPS Route Simulation (2 Cols on LG) -->
+                    <div class="lg:col-span-2 space-y-6">
+                        <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-4">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h3 class="font-bold text-slate-900 text-base">GPS Route Tracker</h3>
+                                    <p class="text-xs text-slate-500">Simulated live GPS route mapping with pet markers</p>
+                                </div>
+                                <div class="text-right">
+                                    <span class="text-xs text-slate-400 block">Distance Covered</span>
+                                    <span class="text-lg font-bold text-slate-900 font-mono">{{ activeWalk.distanceMiles.toFixed(2) }} mi</span>
+                                </div>
+                            </div>
+
+                            <!-- Map Container -->
+                            <div id="walkMap" class="shadow-inner border border-slate-200"></div>
+
+                            <!-- Care Instructions Card for Selected Pet -->
+                            <div v-if="activeWalk.selectedDog || activeWalk.dogName" class="p-4 bg-amber-50/60 border border-amber-200/70 rounded-xl text-xs space-y-2">
+                                <div class="font-bold text-amber-900 flex items-center space-x-1.5">
+                                    <i class="fa-solid fa-clipboard-list text-amber-600"></i>
+                                    <span>Care & Entry Notes for {{ activeWalk.selectedDog || activeWalk.dogName }}</span>
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700">
+                                    <p><strong>Entry Code:</strong> {{ getClientByDog(activeWalk.selectedDog || activeWalk.dogName)?.entryCode || 'N/A' }}</p>
+                                    <p><strong>Leash Spot:</strong> {{ getClientByDog(activeWalk.selectedDog || activeWalk.dogName)?.leashLocation || 'Hallway' }}</p>
+                                    <p class="sm:col-span-2"><strong>Notes/Medical:</strong> {{ getClientByDog(activeWalk.selectedDog || activeWalk.dogName)?.medicalNotes || 'None' }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. CLIENT & DOG CRM TAB -->
+            <div v-if="activeTab === 'clients'" class="space-y-6">
+                
+                <!-- CRM Header Bar -->
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 class="text-2xl font-bold text-slate-900">Client & Pet Directory</h1>
+                        <p class="text-xs text-slate-500">Manage client contact details, pet temperaments, and entry instructions</p>
+                    </div>
+
+                    <button @click="openClientModal()" 
+                            class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold px-4 py-2.5 rounded-xl text-sm transition-all shadow-md flex items-center justify-center space-x-2 self-start sm:self-auto">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>Add New Client</span>
+                    </button>
+                </div>
+
+                <!-- Search & Filters -->
+                <div class="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row gap-3">
+                    <div class="relative flex-1">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-sm"></i>
+                        <input v-model="clientSearch" 
+                               type="text" 
+                               placeholder="Search by dog name, owner, neighborhood..." 
+                               class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-amber-500 outline-none">
+                    </div>
+                    <select v-model="temperamentFilter" class="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 outline-none">
+                        <option value="">All Temperaments</option>
+                        <option value="Friendly">Friendly</option>
+                        <option value="High Energy">High Energy</option>
+                        <option value="Gentle">Gentle</option>
+                        <option value="Reactive">Reactive</option>
+                    </select>
+                </div>
+
+                <!-- CLIENT GRID CARDS -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div v-for="client in filteredClients" :key="client.id" 
+                         class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4">
+                        
+                        <div>
+                            <!-- Header: Dog Name & Breed Badge -->
+                            <div class="flex items-start justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <div class="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 font-bold text-xl flex items-center justify-center shadow-inner">
+                                        🐾
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-slate-900 text-lg leading-tight">{{ client.dogName }}</h3>
+                                        <p class="text-xs text-slate-500">{{ client.breed }} • {{ client.age }} yrs • {{ client.weight }} lbs</p>
+                                    </div>
+                                </div>
+                                <button @click="openClientModal(client)" class="text-slate-400 hover:text-slate-700 p-1">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                            </div>
+
+                            <!-- Temperament Tags -->
+                            <div class="flex flex-wrap gap-1.5 mt-3">
+                                <span v-for="tag in client.tags" :key="tag" 
+                                      class="bg-slate-100 text-slate-700 text-[10px] font-semibold px-2.5 py-0.5 rounded-full border border-slate-200">
+                                    {{ tag }}
+                                </span>
+                            </div>
+
+                            <!-- Details List -->
+                            <div class="mt-4 pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600">
+                                <p class="flex items-center justify-between">
+                                    <span class="text-slate-400"><i class="fa-solid fa-user mr-1.5"></i>Owner:</span>
+                                    <span class="font-semibold text-slate-800">{{ client.ownerName }}</span>
+                                </p>
+                                <p class="flex items-center justify-between">
+                                    <span class="text-slate-400"><i class="fa-solid fa-phone mr-1.5"></i>Phone:</span>
+                                    <a :href="'tel:' + client.phone" class="font-mono text-amber-700 hover:underline">{{ client.phone }}</a>
+                                </p>
+                                <p class="flex items-start justify-between">
+                                    <span class="text-slate-400"><i class="fa-solid fa-location-dot mr-1.5"></i>Address:</span>
+                                    <span class="text-right max-w-[180px] truncate">{{ client.address }} ({{ client.neighborhood }})</span>
+                                </p>
+                                
+                                <!-- Entry Code Box (Blurred toggle for privacy) -->
+                                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 mt-2">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[11px] font-semibold text-slate-500 uppercase">Entry Keycode</span>
+                                        <button @click="client.showCode = !client.showCode" class="text-[10px] text-amber-700 hover:underline">
+                                            {{ client.showCode ? 'Hide' : 'Reveal' }}
+                                        </button>
+                                    </div>
+                                    <p class="font-mono text-sm font-bold text-slate-900 mt-0.5">
+                                        {{ client.showCode ? client.entryCode : '••••••' }}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card Footer Action -->
+                        <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
+                            <span class="text-xs font-semibold text-emerald-700">${{ client.rate }}/walk</span>
+                            <button @click="quickScheduleForClient(client)" 
+                                    class="text-xs bg-slate-100 hover:bg-amber-500 hover:text-slate-950 font-semibold px-3 py-1.5 rounded-lg text-slate-700 transition-colors flex items-center space-x-1">
+                                <i class="fa-solid fa-calendar-plus"></i>
+                                <span>Schedule Walk</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. SCHEDULE & CALENDAR TAB -->
+            <div v-if="activeTab === 'schedule'" class="space-y-6">
+                
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 class="text-2xl font-bold text-slate-900">Walk Schedule</h1>
+                        <p class="text-xs text-slate-500">Organize and book upcoming walk appointments</p>
+                    </div>
+
+                    <button @click="openAddWalkModal()" 
+                            class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold px-4 py-2.5 rounded-xl text-sm transition-all shadow-md flex items-center justify-center space-x-2 self-start sm:self-auto">
+                        <i class="fa-solid fa-calendar-plus"></i>
+                        <span>Book New Walk</span>
+                    </button>
+                </div>
+
+                <!-- Calendar Weekly Matrix -->
+                <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                        <h2 class="font-bold text-slate-800 text-sm">Upcoming Bookings</h2>
+                        <span class="text-xs text-slate-500 font-mono">Showing all scheduled items</span>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100/70 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                    <th class="p-3.5">Date & Time</th>
+                                    <th class="p-3.5">Pet & Client</th>
+                                    <th class="p-3.5">Service Type</th>
+                                    <th class="p-3.5">Rate</th>
+                                    <th class="p-3.5">Status</th>
+                                    <th class="p-3.5 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 text-xs">
+                                <tr v-for="walk in allWalksSorted" :key="walk.id" class="hover:bg-slate-50 transition-colors">
+                                    <td class="p-3.5 font-medium text-slate-900 whitespace-nowrap">
+                                        <div>{{ walk.date }}</div>
+                                        <span class="text-slate-400 text-[11px] font-mono">{{ walk.time }} ({{ walk.duration }}m)</span>
+                                    </td>
+                                    <td class="p-3.5">
+                                        <span class="font-bold text-slate-900 block">{{ walk.dogName }}</span>
+                                        <span class="text-slate-500 text-[11px]">{{ getClientByDog(walk.dogName)?.ownerName }}</span>
+                                    </td>
+                                    <td class="p-3.5 whitespace-nowrap">
+                                        <span class="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md font-medium text-[11px]">
+                                            {{ walk.serviceType || 'Solo Walk' }}
+                                        </span>
+                                    </td>
+                                    <td class="p-3.5 font-semibold text-emerald-700 font-mono">${{ walk.rate }}</td>
+                                    <td class="p-3.5 whitespace-nowrap">
+                                        <span :class="getStatusBadgeClass(walk.status)">{{ walk.status }}</span>
+                                    </td>
+                                    <td class="p-3.5 text-right space-x-2">
+                                        <button v-if="walk.status === 'Scheduled'" 
+                                                @click="startWalkFromSchedule(walk)" 
+                                                class="text-amber-700 font-semibold hover:underline">
+                                            Start Walk
+                                        </button>
+                                        <button @click="deleteWalk(walk.id)" class="text-rose-500 hover:text-rose-700 p-1">
+                                            <i class="fa-solid fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. BILLING & INVOICING TAB -->
+            <div v-if="activeTab === 'billing'" class="space-y-6">
+                
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                        <h1 class="text-2xl font-bold text-slate-900">Billing & Invoicing</h1>
+                        <p class="text-xs text-slate-500">Track earnings, update payment status, and generate client itemized receipts</p>
+                    </div>
+
+                    <button @click="openInvoiceModal()" 
+                            class="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-4 py-2.5 rounded-xl text-sm transition-all shadow-md flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-receipt"></i>
+                        <span>Generate Client Receipt</span>
+                    </button>
+                </div>
+
+                <!-- Earnings Banner Summary -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-emerald-900 text-white p-5 rounded-2xl shadow-sm">
+                        <span class="text-xs text-emerald-300 font-semibold uppercase">Total Collected</span>
+                        <div class="text-3xl font-black mt-1">${{ paidTotalRevenue.toFixed(2) }}</div>
+                        <span class="text-xs text-emerald-200 mt-1 block">From paid completed walks</span>
+                    </div>
+
+                    <div class="bg-amber-900 text-white p-5 rounded-2xl shadow-sm">
+                        <span class="text-xs text-amber-300 font-semibold uppercase">Pending Invoices</span>
+                        <div class="text-3xl font-black mt-1">${{ pendingRevenue.toFixed(2) }}</div>
+                        <span class="text-xs text-amber-200 mt-1 block">{{ pendingCount }} unpaid walk item(s)</span>
+                    </div>
+
+                    <div class="bg-slate-900 text-white p-5 rounded-2xl shadow-sm">
+                        <span class="text-xs text-slate-400 font-semibold uppercase">Total Billable Walks</span>
+                        <div class="text-3xl font-black mt-1">{{ completedWalksList.length }}</div>
+                        <span class="text-xs text-slate-400 mt-1 block">Completed walks logged</span>
+                    </div>
+                </div>
+
+                <!-- Walk Billings Ledger -->
+                <div class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                    <div class="p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <h2 class="font-bold text-slate-800 text-sm">Completed Walks Ledger</h2>
+                        
+                        <!-- Filter Status -->
+                        <div class="flex items-center space-x-2 text-xs">
+                            <button @click="billingPaymentFilter = 'All'" 
+                                    :class="billingPaymentFilter === 'All' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'" 
+                                    class="px-2.5 py-1 rounded-lg transition-colors">
+                                All
+                            </button>
+                            <button @click="billingPaymentFilter = 'Unpaid'" 
+                                    :class="billingPaymentFilter === 'Unpaid' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'" 
+                                    class="px-2.5 py-1 rounded-lg transition-colors">
+                                Unpaid
+                            </button>
+                            <button @click="billingPaymentFilter = 'Paid'" 
+                                    :class="billingPaymentFilter === 'Paid' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'" 
+                                    class="px-2.5 py-1 rounded-lg transition-colors">
+                                Paid
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-100/70 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                    <th class="p-3.5">Date</th>
+                                    <th class="p-3.5">Pet & Client</th>
+                                    <th class="p-3.5">Duration</th>
+                                    <th class="p-3.5">Amount</th>
+                                    <th class="p-3.5">Payment State</th>
+                                    <th class="p-3.5 text-right">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 text-xs">
+                                <tr v-for="walk in filteredBillingWalks" :key="walk.id" class="hover:bg-slate-50">
+                                    <td class="p-3.5 font-medium text-slate-900">{{ walk.date }}</td>
+                                    <td class="p-3.5">
+                                        <span class="font-bold text-slate-900 block">{{ walk.dogName }}</span>
+                                        <span class="text-slate-500 text-[11px]">{{ getClientByDog(walk.dogName)?.ownerName }}</span>
+                                    </td>
+                                    <td class="p-3.5 text-slate-600">{{ walk.duration }} mins</td>
+                                    <td class="p-3.5 font-mono font-bold text-slate-900">${{ walk.rate }}</td>
+                                    <td class="p-3.5">
+                                        <button @click="togglePaymentStatus(walk)" 
+                                                :class="walk.paymentStatus === 'Paid' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-rose-100 text-rose-800 border-rose-300'"
+                                                class="px-2.5 py-1 rounded-full text-[10px] font-bold border transition-transform active:scale-95">
+                                            {{ walk.paymentStatus || 'Unpaid' }} (Click to toggle)
+                                        </button>
+                                    </td>
+                                    <td class="p-3.5 text-right">
+                                        <button @click="generateReceiptForSingleWalk(walk)" class="text-amber-700 hover:underline font-semibold">
+                                            Receipt
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- MODALS SECTION -->
+        
+        <!-- 1. WALK REPORT CARD MODAL -->
+        <div v-if="modals.reportCard" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-scale-in max-h-[90vh] overflow-y-auto custom-scrollbar">
+                
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-2xl">🐾</span>
+                        <h3 class="font-bold text-lg text-slate-900">Walk Report Card</h3>
+                    </div>
+                    <button @click="modals.reportCard = false" class="text-slate-400 hover:text-slate-700">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Report Card Preview Body -->
+                <div id="reportCardContent" class="bg-gradient-to-b from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 space-y-4">
+                    <div class="text-center border-b border-amber-200/80 pb-3">
+                        <h4 class="text-xl font-extrabold text-amber-900">{{ currentReportCard.dogName }}'s Walk Summary! 🐕</h4>
+                        <p class="text-xs text-amber-700 font-medium">{{ currentReportCard.date }} • {{ currentReportCard.time }}</p>
+                    </div>
+
+                    <!-- Stats Grid -->
+                    <div class="grid grid-cols-2 gap-3 text-center">
+                        <div class="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block">Duration</span>
+                            <span class="text-base font-black text-slate-800">{{ currentReportCard.duration }} mins</span>
+                        </div>
+                        <div class="bg-white/80 p-2.5 rounded-xl border border-amber-200/60">
+                            <span class="text-[10px] uppercase font-bold text-slate-400 block">Distance</span>
+                            <span class="text-base font-black text-slate-800">{{ currentReportCard.distance || '0.85' }} mi</span>
+                        </div>
+                    </div>
+
+                    <!-- Potty & Treat Logs -->
+                    <div class="bg-white/90 rounded-xl p-3 border border-amber-200/60 space-y-1.5 text-xs">
+                        <div class="font-bold text-slate-700 mb-1">Pawsome Milestones:</div>
+                        <div class="grid grid-cols-2 gap-2 text-slate-700">
+                            <span>💦 Pee: <strong>{{ currentReportCard.events?.pee || 0 }} times</strong></span>
+                            <span>💩 Poop: <strong>{{ currentReportCard.events?.poop || 0 }} times</strong></span>
+                            <span>🥣 Water: <strong>{{ currentReportCard.events?.water || 0 }} breaks</strong></span>
+                            <span>🦴 Treats: <strong>{{ currentReportCard.events?.treat || 0 }} given</strong></span>
+                        </div>
+                    </div>
+
+                    <!-- Behavior Notes -->
+                    <div class="bg-white/90 rounded-xl p-3 border border-amber-200/60 text-xs">
+                        <span class="font-bold text-slate-700 block mb-1">Walker Note:</span>
+                        <p class="text-slate-600 italic">"{{ currentReportCard.notes || 'Had a fantastic walk around the park today!' }}"</p>
+                    </div>
+
+                    <div class="text-center text-[10px] text-amber-800 font-medium pt-1">
+                        Sent with ❤️ via PawsTrack Pro
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row gap-3 pt-2">
+                    <button @click="copySMSReportCard" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold py-2.5 rounded-xl text-sm transition-all shadow-md flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-copy"></i>
+                        <span>Copy SMS Text for Owner</span>
+                    </button>
+                    <button @click="modals.reportCard = false" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2.5 rounded-xl text-sm transition-colors">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. ADD/EDIT CLIENT MODAL -->
+        <div v-if="modals.client" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 class="font-bold text-lg text-slate-900">{{ editingClient.id ? 'Edit Client' : 'Add New Client & Pet' }}</h3>
+                    <button @click="modals.client = false" class="text-slate-400 hover:text-slate-700">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+
+                <form @submit.prevent="saveClient" class="space-y-4 text-xs">
+                    <!-- Owner Info Section -->
+                    <div class="space-y-3">
+                        <h4 class="font-bold text-slate-500 uppercase tracking-wider text-[11px]">Owner Information</h4>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Owner Full Name</label>
+                                <input v-model="editingClient.ownerName" required type="text" placeholder="Sarah Jenkins" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Phone Number</label>
+                                <input v-model="editingClient.phone" required type="text" placeholder="(555) 019-2834" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Street Address</label>
+                                <input v-model="editingClient.address" required type="text" placeholder="742 Evergreen Terrace" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Neighborhood</label>
+                                <input v-model="editingClient.neighborhood" required type="text" placeholder="Lincoln Park" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Lockbox / Entry Code</label>
+                                <input v-model="editingClient.entryCode" required type="text" placeholder="Keybox 4821" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Standard Walk Rate ($)</label>
+                                <input v-model.number="editingClient.rate" required type="number" placeholder="25" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Pet Info Section -->
+                    <div class="space-y-3 pt-3 border-t border-slate-100">
+                        <h4 class="font-bold text-slate-500 uppercase tracking-wider text-[11px]">Pet Details</h4>
+                        <div class="grid grid-cols-3 gap-3">
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Dog Name</label>
+                                <input v-model="editingClient.dogName" required type="text" placeholder="Milo" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Breed</label>
+                                <input v-model="editingClient.breed" required type="text" placeholder="Golden Retriever" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Age (Yrs)</label>
+                                <input v-model.number="editingClient.age" type="number" placeholder="3" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Temperament Tags (comma separated)</label>
+                                <input v-model="editingClient.tagsInput" type="text" placeholder="Friendly, High Energy" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                            <div>
+                                <label class="block font-semibold text-slate-700 mb-1">Leash / Harness Location</label>
+                                <input v-model="editingClient.leashLocation" type="text" placeholder="Hallway closet basket" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Medical or Dietary Notes</label>
+                            <textarea v-model="editingClient.medicalNotes" rows="2" placeholder="Allergic to chicken treats; takes hip supplement after walk" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500 resize-none"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                        <button type="button" @click="modals.client = false" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold">Cancel</button>
+                        <button type="submit" class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold shadow-md">Save Client</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 3. BOOK WALK MODAL -->
+        <div v-if="modals.addWalk" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 class="font-bold text-lg text-slate-900">Schedule Walk Appointment</h3>
+                    <button @click="modals.addWalk = false" class="text-slate-400 hover:text-slate-700">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+
+                <form @submit.prevent="saveNewWalk" class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Select Pet</label>
+                        <select v-model="newWalk.dogName" required class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500 bg-white">
+                            <option v-for="c in clients" :key="c.id" :value="c.dogName">{{ c.dogName }} ({{ c.ownerName }})</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Date</label>
+                            <input v-model="newWalk.date" type="date" required class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Time</label>
+                            <input v-model="newWalk.time" type="text" placeholder="10:30 AM" required class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Duration (Mins)</label>
+                            <select v-model.number="newWalk.duration" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500 bg-white">
+                                <option :value="30">30 Mins</option>
+                                <option :value="45">45 Mins</option>
+                                <option :value="60">60 Mins</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-semibold text-slate-700 mb-1">Price Rate ($)</label>
+                            <input v-model.number="newWalk.rate" type="number" required class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">Service Type</label>
+                        <select v-model="newWalk.serviceType" class="w-full border border-slate-300 rounded-xl p-2.5 outline-none focus:ring-2 focus:ring-amber-500 bg-white">
+                            <option value="Solo Walk">30-min Solo Walk</option>
+                            <option value="Group Walk">60-min Group Walk</option>
+                            <option value="Puppy Visit">Quick Puppy Visit</option>
+                        </select>
+                    </div>
+
+                    <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                        <button type="button" @click="modals.addWalk = false" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold">Cancel</button>
+                        <button type="submit" class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold shadow-md">Schedule</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 4. INVOICE RECEIPT GENERATOR MODAL -->
+        <div v-if="modals.invoice" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 class="font-bold text-lg text-slate-900">Itemized Client Receipt</h3>
+                    <button @click="modals.invoice = false" class="text-slate-400 hover:text-slate-700">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Select Client</label>
+                    <select v-model="invoiceSelectedClient" class="w-full border border-slate-300 rounded-xl p-2 text-xs bg-white outline-none">
+                        <option v-for="c in clients" :key="c.id" :value="c.ownerName">{{ c.ownerName }} (Dog: {{ c.dogName }})</option>
+                    </select>
+                </div>
+
+                <!-- Printable Receipt Canvas -->
+                <div id="receiptCanvas" class="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4 font-mono text-xs text-slate-800">
+                    <div class="text-center border-b border-slate-200 pb-3">
+                        <h4 class="font-bold text-base text-slate-900">PAWSTRACK PRO PET SERVICES</h4>
+                        <p class="text-[10px] text-slate-500">Official Walk Statement</p>
+                        <p class="text-[11px] text-slate-700 mt-1">Client: {{ invoiceSelectedClient }}</p>
+                    </div>
+
+                    <!-- Line Items -->
+                    <div class="space-y-2">
+                        <div v-for="item in invoiceItems" :key="item.id" class="flex justify-between items-center text-[11px]">
+                            <div>
+                                <span>{{ item.date }} - {{ item.dogName }} ({{ item.duration }}m)</span>
+                            </div>
+                            <span class="font-bold">${{ item.rate.toFixed(2) }}</span>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-slate-300 pt-2 flex justify-between items-center font-bold text-sm text-slate-900">
+                        <span>TOTAL DUE:</span>
+                        <span>${{ invoiceTotal.toFixed(2) }}</span>
+                    </div>
+                </div>
+
+                <div class="flex justify-between gap-3 pt-2">
+                    <button @click="copyReceiptToClipboard" class="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-xl text-xs transition-all flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-copy"></i>
+                        <span>Copy Statement Text</span>
+                    </button>
+                    <button @click="modals.invoice = false" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-4 py-2.5 rounded-xl text-xs">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        // Sample Data Seed
+        const INITIAL_CLIENTS = [
+            {
+                id: 1,
+                ownerName: 'Sarah Jenkins',
+                dogName: 'Milo',
+                breed: 'Golden Retriever',
+                age: 3,
+                weight: 68,
+                phone: '(555) 234-5678',
+                address: '1420 N Wells St',
+                neighborhood: 'Old Town',
+                entryCode: 'Keybox 4821',
+                showCode: false,
+                rate: 30,
+                tags: ['Friendly', 'High Energy'],
+                tagsInput: 'Friendly, High Energy',
+                leashLocation: 'Hallway closet basket',
+                medicalNotes: 'Sensitve tummy - only give provided salmon treats.'
+            },
+            {
+                id: 2,
+                ownerName: 'David Chen',
+                dogName: 'Luna',
+                breed: 'French Bulldog',
+                age: 2,
+                weight: 24,
+                phone: '(555) 876-5432',
+                address: '210 W Chicago Ave',
+                neighborhood: 'River North',
+                entryCode: 'Smart Lock 1109#',
+                showCode: false,
+                rate: 25,
+                tags: ['Gentle', 'Slow Walker'],
+                tagsInput: 'Gentle, Slow Walker',
+                leashLocation: 'Red harness on entry hook',
+                medicalNotes: 'Overheats easily in summer; keep walks short.'
+            },
+            {
+                id: 3,
+                ownerName: 'Marcus Vance',
+                dogName: 'Rocky',
+                breed: 'German Shepherd',
+                age: 5,
+                weight: 82,
+                phone: '(555) 345-6789',
+                address: '850 N Michigan Ave',
+                neighborhood: 'Gold Coast',
+                entryCode: 'Doorman Buzz #402',
+                showCode: false,
+                rate: 35,
+                tags: ['Reactive', 'Leash Puller'],
+                tagsInput: 'Reactive, Leash Puller',
+                leashLocation: 'Heavy duty double leash on coat rack',
+                medicalNotes: 'Keep distance from squirrels and large male dogs.'
+            }
+        ];
+
+        // Helper for Today's Date String format YYYY-MM-DD
+        const getTodayString = () => new Date().toISOString().split('T')[0];
+
+        const INITIAL_WALKS = [
+            {
+                id: 101,
+                dogName: 'Milo',
+                date: getTodayString(),
+                time: '09:00 AM',
+                duration: 30,
+                rate: 30,
+                status: 'Completed',
+                paymentStatus: 'Paid',
+                serviceType: '30-min Solo Walk',
+                notes: 'Super cheerful, chased tennis ball twice!',
+                events: { pee: 2, poop: 1, water: 1, treat: 3 },
+                distance: '1.2'
+            },
+            {
+                id: 102,
+                dogName: 'Luna',
+                date: getTodayString(),
+                time: '11:30 AM',
+                duration: 30,
+                rate: 25,
+                status: 'Scheduled',
+                paymentStatus: 'Unpaid',
+                serviceType: '30-min Solo Walk',
+                notes: '',
+                events: { pee: 0, poop: 0, water: 0, treat: 0 },
+                distance: '0.0'
+            },
+            {
+                id: 103,
+                dogName: 'Rocky',
+                date: getTodayString(),
+                time: '02:00 PM',
+                duration: 45,
+                rate: 35,
+                status: 'Scheduled',
+                paymentStatus: 'Unpaid',
+                serviceType: '60-min Group Walk',
+                notes: '',
+                events: { pee: 0, poop: 0, water: 0, treat: 0 },
+                distance: '0.0'
+            }
+        ];
+
+        createApp({
+            data() {
+                return {
+                    activeTab: 'dashboard',
+                    tabs: [
+                        { id: 'dashboard', name: 'Dashboard', icon: 'fa-solid fa-chart-pie' },
+                        { id: 'walk', name: 'Active Walk', icon: 'fa-solid fa-person-walking-with-dog' },
+                        { id: 'clients', name: 'Clients & Pets', icon: 'fa-solid fa-dog' },
+                        { id: 'schedule', name: 'Schedule', icon: 'fa-solid fa-calendar-days' },
+                        { id: 'billing', name: 'Billing', icon: 'fa-solid fa-file-invoice-dollar' }
+                    ],
+                    
+                    // Core state persistent models
+                    clients: JSON.parse(localStorage.getItem('paws_clients')) || INITIAL_CLIENTS,
+                    walks: JSON.parse(localStorage.getItem('paws_walks')) || INITIAL_WALKS,
+                    
+                    // UI filters
+                    timelineFilter: 'All',
+                    clientSearch: '',
+                    temperamentFilter: '',
+                    billingPaymentFilter: 'All',
+
+                    // Active Walk Timer & Tracker State
+                    activeWalk: {
+                        selectedDog: '',
+                        dogName: '',
+                        isRunning: false,
+                        elapsedSeconds: 0,
+                        timerInterval: null,
+                        events: { pee: 0, poop: 0, water: 0, treat: 0 },
+                        notes: '',
+                        distanceMiles: 0.0,
+                        currentWalkId: null
+                    },
+
+                    // Leaflet Map state
+                    map: null,
+                    mapPolyline: null,
+                    mapMarker: null,
+                    routeCoordinates: [],
+
+                    // Modals control
+                    modals: {
+                        reportCard: false,
+                        client: false,
+                        addWalk: false,
+                        invoice: false
+                    },
+
+                    // Editing buffer forms
+                    currentReportCard: {},
+                    editingClient: {},
+                    newWalk: {
+                        dogName: '',
+                        date: getTodayString(),
+                        time: '10:00 AM',
+                        duration: 30,
+                        rate: 30,
+                        serviceType: 'Solo Walk'
+                    },
+
+                    // Invoice State
+                    invoiceSelectedClient: 'Sarah Jenkins',
+
+                    // Toast Notification System
+                    toast: {
+                        show: false,
+                        message: '',
+                        icon: ''
+                    }
+                }
+            },
+
+            computed: {
+                formattedTodayDate() {
+                    const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                    return new Date().toLocaleDateString(undefined, options);
+                },
+
+                todayWalks() {
+                    const todayStr = getTodayString();
+                    return this.walks.filter(w => w.date === todayStr);
+                },
+
+                filteredTodayWalks() {
+                    if (this.timelineFilter === 'All') return this.todayWalks;
+                    return this.todayWalks.filter(w => w.status === this.timelineFilter);
+                },
+
+                todayScheduledCount() {
+                    return this.todayWalks.length;
+                },
+
+                todayCompletedCount() {
+                    return this.todayWalks.filter(w => w.status === 'Completed').length;
+                },
+
+                completedThisWeekCount() {
+                    return this.walks.filter(w => w.status === 'Completed').length;
+                },
+
+                weeklyRevenue() {
+                    return this.walks
+                        .filter(w => w.status === 'Completed')
+                        .reduce((sum, w) => sum + (Number(w.rate) || 0), 0);
+                },
+
+                pendingRevenue() {
+                    return this.walks
+                        .filter(w => w.status === 'Completed' && w.paymentStatus !== 'Paid')
+                        .reduce((sum, w) => sum + (Number(w.rate) || 0), 0);
+                },
+
+                paidTotalRevenue() {
+                    return this.walks
+                        .filter(w => w.status === 'Completed' && w.paymentStatus === 'Paid')
+                        .reduce((sum, w) => sum + (Number(w.rate) || 0), 0);
+                },
+
+                pendingCount() {
+                    return this.walks.filter(w => w.status === 'Completed' && w.paymentStatus !== 'Paid').length;
+                },
+
+                filteredClients() {
+                    return this.clients.filter(c => {
+                        const searchLower = this.clientSearch.toLowerCase();
+                        const matchesSearch = c.dogName.toLowerCase().includes(searchLower) ||
+                                              c.ownerName.toLowerCase().includes(searchLower) ||
+                                              c.neighborhood.toLowerCase().includes(searchLower);
+                        
+                        const matchesTemp = !this.temperamentFilter || c.tags.includes(this.temperamentFilter);
+                        return matchesSearch && matchesTemp;
+                    });
+                },
+
+                allWalksSorted() {
+                    return [...this.walks].sort((a, b) => new Date(b.date) - new Date(a.date));
+                },
+
+                completedWalksList() {
+                    return this.walks.filter(w => w.status === 'Completed');
+                },
+
+                filteredBillingWalks() {
+                    if (this.billingPaymentFilter === 'All') return this.completedWalksList;
+                    return this.completedWalksList.filter(w => (w.paymentStatus || 'Unpaid') === this.billingPaymentFilter);
+                },
+
+                invoiceItems() {
+                    return this.completedWalksList.filter(w => {
+                        const client = this.getClientByDog(w.dogName);
+                        return client && client.ownerName === this.invoiceSelectedClient;
+                    });
+                },
+
+                invoiceTotal() {
+                    return this.invoiceItems.reduce((sum, i) => sum + i.rate, 0);
+                }
+            },
+
+            watch: {
+                clients: {
+                    handler(val) {
+                        localStorage.setItem('paws_clients', JSON.stringify(val));
+                    },
+                    deep: true
+                },
+                walks: {
+                    handler(val) {
+                        localStorage.setItem('paws_walks', JSON.stringify(val));
+                    },
+                    deep: true
+                }
+            },
+
+            mounted() {
+                // Pre-select first client for walk dropdown if available
+                if (this.clients.length > 0) {
+                    this.activeWalk.selectedDog = this.clients[0].dogName;
+                    this.invoiceSelectedClient = this.clients[0].ownerName;
+                }
+            },
+
+            methods: {
+                setActiveTab(tabId) {
+                    this.activeTab = tabId;
+                    if (tabId === 'walk') {
+                        this.$nextTick(() => {
+                            this.initMapIfNeeded();
+                        });
+                    }
+                },
+
+                showToast(message, icon = 'fa-solid fa-check') {
+                    this.toast.message = message;
+                    this.toast.icon = icon;
+                    this.toast.show = true;
+                    setTimeout(() => {
+                        this.toast.show = false;
+                    }, 3500);
+                },
+
+                getClientByDog(dogName) {
+                    return this.clients.find(c => c.dogName.toLowerCase() === (dogName || '').toLowerCase());
+                },
+
+                getStatusBadgeClass(status) {
+                    switch(status) {
+                        case 'Completed': return 'bg-emerald-100 text-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-semibold border border-emerald-200';
+                        case 'In Progress': return 'bg-amber-100 text-amber-800 text-xs px-2.5 py-0.5 rounded-full font-semibold border border-amber-300 animate-pulse';
+                        default: return 'bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-full font-semibold border border-slate-200';
+                    }
+                },
+
+                // TIMER & ACTIVE WALK LOGIC
+                startWalkFromSchedule(walk) {
+                    walk.status = 'In Progress';
+                    this.activeWalk.dogName = walk.dogName;
+                    this.activeWalk.selectedDog = walk.dogName;
+                    this.activeWalk.currentWalkId = walk.id;
+                    this.setActiveTab('walk');
+                    this.startTimer();
+                    this.showToast(`Started active walk session with ${walk.dogName}!`, 'fa-solid fa-dog');
+                },
+
+                startTimer() {
+                    if (!this.activeWalk.dogName) {
+                        this.activeWalk.dogName = this.activeWalk.selectedDog;
+                    }
+                    this.activeWalk.isRunning = true;
+                    this.activeWalk.timerInterval = setInterval(() => {
+                        this.activeWalk.elapsedSeconds++;
+                        this.activeWalk.distanceMiles += 0.0008; // Simulate continuous GPS distance
+                        this.simulateGpsMovement();
+                    }, 1000);
+                },
+
+                pauseTimer() {
+                    this.activeWalk.isRunning = false;
+                    clearInterval(this.activeWalk.timerInterval);
+                },
+
+                formatTime(totalSeconds) {
+                    const hrs = Math.floor(totalSeconds / 3600);
+                    const mins = Math.floor((totalSeconds % 3600) / 60);
+                    const secs = totalSeconds % 60;
+                    return [hrs, mins, secs]
+                        .map(v => v < 10 ? '0' + v : v)
+                        .filter((v, i) => v !== '00' || i > 0)
+                        .join(':');
+                },
+
+                incrementEvent(eventType) {
+                    this.activeWalk.events[eventType]++;
+                    this.showToast(`Logged ${eventType.toUpperCase()} for ${this.activeWalk.dogName || 'Dog'}!`);
+                },
+
+                finishWalk() {
+                    this.pauseTimer();
+                    const walkDurationMinutes = Math.max(1, Math.round(this.activeWalk.elapsedSeconds / 60));
+                    
+                    let walkRecord;
+                    if (this.activeWalk.currentWalkId) {
+                        walkRecord = this.walks.find(w => w.id === this.activeWalk.currentWalkId);
+                    }
+
+                    if (!walkRecord) {
+                        const client = this.getClientByDog(this.activeWalk.dogName);
+                        walkRecord = {
+                            id: Date.now(),
+                            dogName: this.activeWalk.dogName,
+                            date: getTodayString(),
+                            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                            rate: client ? client.rate : 25,
+                            paymentStatus: 'Unpaid'
+                        };
+                        this.walks.push(walkRecord);
+                    }
+
+                    // Update walk record attributes
+                    walkRecord.status = 'Completed';
+                    walkRecord.duration = walkDurationMinutes;
+                    walkRecord.events = { ...this.activeWalk.events };
+                    walkRecord.notes = this.activeWalk.notes;
+                    walkRecord.distance = this.activeWalk.distanceMiles.toFixed(2);
+
+                    // Show Report Card
+                    this.viewReportCard(walkRecord);
+
+                    // Reset Active Walk State
+                    this.activeWalk.elapsedSeconds = 0;
+                    this.activeWalk.events = { pee: 0, poop: 0, water: 0, treat: 0 };
+                    this.activeWalk.notes = '';
+                    this.activeWalk.distanceMiles = 0;
+                    this.activeWalk.currentWalkId = null;
+                },
+
+                // LEAFLET MAP & SIMULATED GPS
+                initMapIfNeeded() {
+                    if (this.map) return;
+                    const mapElem = document.getElementById('walkMap');
+                    if (!mapElem) return;
+
+                    // Centered around sample neighborhood coordinates (e.g., Lincoln Park / Chicago area)
+                    const initialLat = 41.9214;
+                    const initialLng = -87.6513;
+
+                    this.map = L.map('walkMap').setView([initialLat, initialLng], 16);
+
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                        attribution: '© OpenStreetMap'
+                    }).addTo(this.map);
+
+                    this.routeCoordinates = [[initialLat, initialLng]];
+
+                    // Paw Icon Marker
+                    const pawIcon = L.divIcon({
+                        className: 'paw-marker',
+                        html: '🐾',
+                        iconSize: [24, 24]
+                    });
+
+                    this.mapMarker = L.marker([initialLat, initialLng], { icon: pawIcon }).addTo(this.map);
+                    this.mapPolyline = L.polyline(this.routeCoordinates, { color: '#d97706', weight: 4 }).addTo(this.map);
+                },
+
+                simulateGpsMovement() {
+                    if (!this.map) return;
+                    const lastCoord = this.routeCoordinates[this.routeCoordinates.length - 1];
+                    const deltaLat = (Math.random() - 0.48) * 0.00015;
+                    const deltaLng = (Math.random() - 0.48) * 0.00015;
+
+                    const newCoord = [lastCoord[0] + deltaLat, lastCoord[1] + deltaLng];
+                    this.routeCoordinates.push(newCoord);
+
+                    if (this.mapPolyline) {
+                        this.mapPolyline.setLatLngs(this.routeCoordinates);
+                    }
+                    if (this.mapMarker) {
+                        this.mapMarker.setLatLng(newCoord);
+                    }
+                    this.map.panTo(newCoord);
+                },
+
+                // REPORT CARD & SMS LOGIC
+                viewReportCard(walk) {
+                    this.currentReportCard = walk;
+                    this.modals.reportCard = true;
+                },
+
+                copySMSReportCard() {
+                    const r = this.currentReportCard;
+                    const smsText = `PawsTrack Report for ${r.dogName}! 🐾\nDuration: ${r.duration} mins (${r.distance || '0.8'} miles)\nPotty Log: 💦 Pee: ${r.events?.pee || 0}, 💩 Poop: ${r.events?.poop || 0}\nNotes: ${r.notes || 'Great walk today!'}\nHave a wonderful day!`;
+
+                    // Safe iFrame fallback clipboard technique
+                    const el = document.createElement('textarea');
+                    el.value = smsText;
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+
+                    this.showToast('SMS Report copied to clipboard!', 'fa-solid fa-copy');
+                },
+
+                // CRM LOGIC
+                openClientModal(client = null) {
+                    if (client) {
+                        this.editingClient = { ...client, tagsInput: client.tags ? client.tags.join(', ') : '' };
+                    } else {
+                        this.editingClient = {
+                            ownerName: '',
+                            dogName: '',
+                            breed: '',
+                            age: 3,
+                            weight: 25,
+                            phone: '',
+                            address: '',
+                            neighborhood: '',
+                            entryCode: '',
+                            rate: 25,
+                            tagsInput: 'Friendly',
+                            leashLocation: '',
+                            medicalNotes: ''
+                        };
+                    }
+                    this.modals.client = true;
+                },
+
+                saveClient() {
+                    const tags = this.editingClient.tagsInput
+                        ? this.editingClient.tagsInput.split(',').map(t => t.trim()).filter(Boolean)
+                        : ['Friendly'];
+
+                    if (this.editingClient.id) {
+                        const index = this.clients.findIndex(c => c.id === this.editingClient.id);
+                        if (index !== -1) {
+                            this.clients[index] = { ...this.editingClient, tags };
+                        }
+                    } else {
+                        const newClient = {
+                            ...this.editingClient,
+                            id: Date.now(),
+                            tags,
+                            showCode: false
+                        };
+                        this.clients.push(newClient);
+                    }
+                    this.modals.client = false;
+                    this.showToast('Client saved successfully!');
+                },
+
+                quickScheduleForClient(client) {
+                    this.newWalk.dogName = client.dogName;
+                    this.newWalk.rate = client.rate;
+                    this.openAddWalkModal();
+                },
+
+                // SCHEDULE LOGIC
+                openAddWalkModal() {
+                    if (this.clients.length > 0 && !this.newWalk.dogName) {
+                        this.newWalk.dogName = this.clients[0].dogName;
+                    }
+                    this.modals.addWalk = true;
+                },
+
+                saveNewWalk() {
+                    const createdWalk = {
+                        id: Date.now(),
+                        dogName: this.newWalk.dogName,
+                        date: this.newWalk.date,
+                        time: this.newWalk.time,
+                        duration: this.newWalk.duration,
+                        rate: this.newWalk.rate,
+                        serviceType: this.newWalk.serviceType,
+                        status: 'Scheduled',
+                        paymentStatus: 'Unpaid',
+                        events: { pee: 0, poop: 0, water: 0, treat: 0 },
+                        notes: ''
+                    };
+                    this.walks.push(createdWalk);
+                    this.modals.addWalk = false;
+                    this.showToast(`Walk scheduled for ${this.newWalk.dogName}!`);
+                },
+
+                deleteWalk(id) {
+                    this.walks = this.walks.filter(w => w.id !== id);
+                    this.showToast('Walk booking removed');
+                },
+
+                markWalkCompleted(id) {
+                    const walk = this.walks.find(w => w.id === id);
+                    if (walk) {
+                        walk.status = 'Completed';
+                        this.showToast(`Marked walk with ${walk.dogName} as completed!`);
+                    }
+                },
+
+                // BILLING & INVOICE LOGIC
+                togglePaymentStatus(walk) {
+                    walk.paymentStatus = walk.paymentStatus === 'Paid' ? 'Unpaid' : 'Paid';
+                    this.showToast(`Payment status updated to ${walk.paymentStatus}`);
+                },
+
+                openInvoiceModal() {
+                    this.modals.invoice = true;
+                },
+
+                generateReceiptForSingleWalk(walk) {
+                    const client = this.getClientByDog(walk.dogName);
+                    if (client) {
+                        this.invoiceSelectedClient = client.ownerName;
+                    }
+                    this.modals.invoice = true;
+                },
+
+                copyReceiptToClipboard() {
+                    const elem = document.getElementById('receiptCanvas');
+                    const text = elem ? elem.innerText : '';
+                    
+                    const el = document.createElement('textarea');
+                    el.value = text;
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+
+                    this.showToast('Itemized statement copied to clipboard!');
+                },
+
+                openQuickWalkModal() {
+                    this.openAddWalkModal();
+                },
+
+                confirmResetData() {
+                    this.clients = INITIAL_CLIENTS;
+                    this.walks = INITIAL_WALKS;
+                    localStorage.removeItem('paws_clients');
+                    localStorage.removeItem('paws_walks');
+                    this.showToast('Sample data reset to default!', 'fa-solid fa-rotate-left');
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
