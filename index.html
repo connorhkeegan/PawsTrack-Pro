@@ -1693,5 +1693,28 @@
             }
         }).mount('#app');
     </script>
+<head>
+  <!-- Other existing tags... -->
+
+  <!-- 1. Firebase App & Services SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.x.x/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.x.x/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.x.x/firebase-firestore-compat.js"></script>
+
+  <!-- 2. Firebase Connection / Config -->
+  <script>
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+  </script>
+</head>
 </body>
 </html>
